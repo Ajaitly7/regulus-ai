@@ -21,39 +21,113 @@ import { riskColor, riskScoreColor, formatDate } from "@/lib/utils";
 const audiences: Audience[] = ["Executive", "Legal", "Public Affairs", "Product", "Compliance"];
 const tones: Tone[] = ["Concise", "Detailed", "Board-Ready"];
 
+// Audience/tone map to API values
+const audienceApiMap: Record<Audience, string> = {
+  Executive: "executive",
+  Legal: "legal",
+  "Public Affairs": "ops",
+  Product: "ops",
+  Compliance: "ops",
+};
+const toneApiMap: Record<Tone, string> = {
+  Concise: "concise",
+  Detailed: "formal",
+  "Board-Ready": "formal",
+};
+
+interface DbDocument {
+  id: string;
+  title: string;
+  source: string;
+  jurisdiction: string;
+  category: string;
+  analyses: Array<{ riskScore: number; riskLevel: string }>;
+}
+
 function BriefsContent() {
   const searchParams = useSearchParams();
   const preselected = searchParams.get("documentId");
+  const preselectedQuery = searchParams.get("query");
 
   const [docId, setDocId] = useState(preselected || "");
   const [audience, setAudience] = useState<Audience>("Executive");
   const [tone, setTone] = useState<Tone>("Concise");
   const [brief, setBrief] = useState<ReturnType<typeof generateBrief> | null>(null);
+  const [aiContent, setAiContent] = useState<string | null>(null);
+  const [aiRiskScore, setAiRiskScore] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [dbDocuments, setDbDocuments] = useState<DbDocument[]>([]);
+  const [useAiMode, setUseAiMode] = useState(false);
 
   useEffect(() => {
-    if (preselected) setDocId(preselected);
-  }, [preselected]);
+    if (preselected) { setDocId(preselected); setUseAiMode(true); }
+    if (preselectedQuery) setUseAiMode(true);
+  }, [preselected, preselectedQuery]);
+
+  // Load DB documents for AI mode
+  useEffect(() => {
+    fetch("/api/documents")
+      .then((r) => r.json())
+      .then((data: DbDocument[]) => setDbDocuments(data))
+      .catch(() => {});
+  }, []);
 
   const selectedDoc = regulatoryUpdates.find((r) => r.id === docId);
+  const selectedDbDoc = dbDocuments.find((d) => d.id === docId);
 
-  const handleGenerate = () => {
-    if (!selectedDoc) return;
+  const handleGenerate = async () => {
     setLoading(true);
     setBrief(null);
-    setTimeout(() => {
-      setBrief(generateBrief(selectedDoc, audience, tone));
+    setAiContent(null);
+
+    // Try AI mode if docId matches a DB document
+    if (selectedDbDoc) {
+      try {
+        const res = await fetch("/api/briefs/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            documentId: selectedDbDoc.id,
+            audience: audienceApiMap[audience],
+            tone: toneApiMap[tone],
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAiContent(data.content);
+          setAiRiskScore(data.riskScore);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // fall through to mock
+      }
+    }
+
+    // Mock fallback for static data
+    if (selectedDoc) {
+      setTimeout(() => {
+        setBrief(generateBrief(selectedDoc, audience, tone));
+        setLoading(false);
+      }, 1200);
+    } else {
       setLoading(false);
-    }, 1200);
+    }
   };
 
   const handleCopy = () => {
-    if (!brief) return;
-    navigator.clipboard.writeText(briefToText(brief));
+    const text = aiContent ?? (brief ? briefToText(brief) : "");
+    navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Merge DB + static docs for selector
+  const allDocOptions = [
+    ...dbDocuments.map((d) => ({ id: d.id, label: `[DB] ${d.title}`, riskLevel: d.analyses[0]?.riskLevel ?? "—" })),
+    ...regulatoryUpdates.map((r) => ({ id: r.id, label: r.title, riskLevel: r.riskLevel })),
+  ];
 
   return (
     <AppShell>
@@ -83,9 +157,9 @@ function BriefsContent() {
                   <option value="" className="bg-[#111112]">
                     — Choose a document —
                   </option>
-                  {regulatoryUpdates.map((r) => (
+                  {allDocOptions.map((r) => (
                     <option key={r.id} value={r.id} className="bg-[#111112]">
-                      [{r.riskLevel}] {r.title}
+                      [{r.riskLevel}] {r.label}
                     </option>
                   ))}
                 </select>
@@ -190,12 +264,49 @@ function BriefsContent() {
 
           {/* Brief output */}
           <div>
-            {!brief && !loading && (
+            {!brief && !aiContent && !loading && (
               <div className="h-full bg-[#0D0D0E] border border-white/5 border-dashed rounded-xl flex flex-col items-center justify-center text-center p-10">
                 <FileText className="w-12 h-12 text-zinc-700 mb-4" />
                 <div className="text-sm text-zinc-500 mb-1">Your brief will appear here</div>
                 <div className="text-xs text-zinc-700">
                   Configure options on the left and click Generate
+                </div>
+              </div>
+            )}
+
+            {/* AI-generated brief (from DB document) */}
+            {aiContent && !loading && (
+              <div className="bg-[#0D0D0E] border border-[#D4A843]/30 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/5 bg-[#D4A843]/5">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Regulus AI · Policy Brief</span>
+                      <span className="w-1 h-1 rounded-full bg-zinc-600" />
+                      <span className="text-[10px] text-[#D4A843]">AI-Generated · {audience} · {tone}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleCopy}
+                        className="flex items-center gap-1.5 text-xs bg-[#D4A843]/10 border border-[#D4A843]/30 text-[#D4A843] px-2.5 py-1.5 rounded hover:bg-[#D4A843]/20 transition-all"
+                      >
+                        {copied ? <><CheckCircle2 className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy Brief</>}
+                      </button>
+                    </div>
+                  </div>
+                  {aiRiskScore !== null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-3xl font-black text-[#D4A843] font-mono">{aiRiskScore}</span>
+                      <span className="text-xs text-zinc-500">/ 100 Risk Score</span>
+                    </div>
+                  )}
+                </div>
+                <div className="p-5 max-h-[600px] overflow-y-auto prose prose-invert prose-sm max-w-none prose-headings:text-white prose-headings:font-bold prose-strong:text-zinc-200 text-zinc-300 text-sm leading-relaxed">
+                  {aiContent.split("\n").map((line, i) => {
+                    if (line.startsWith("## ")) return <h2 key={i} className="text-sm font-bold text-white mt-4 mb-1.5 text-[10px] uppercase tracking-widest text-zinc-500">{line.slice(3)}</h2>;
+                    if (line.startsWith("- ")) return <div key={i} className="flex items-start gap-2 text-xs text-zinc-300 mb-1"><span className="text-[#D4A843] mt-0.5">•</span>{line.slice(2)}</div>;
+                    if (line.trim() === "") return <div key={i} className="h-2" />;
+                    return <p key={i} className="text-xs text-zinc-400 leading-relaxed mb-1">{line}</p>;
+                  })}
                 </div>
               </div>
             )}

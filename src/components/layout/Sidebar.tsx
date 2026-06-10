@@ -11,6 +11,10 @@ import {
   BarChart3,
   Shield,
   Bell,
+  Lock,
+  Database,
+  Upload,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +25,13 @@ const nav = [
   { label: "Stakeholder Map", href: "/stakeholders", icon: Users },
   { label: "Campaigns", href: "/campaigns", icon: Briefcase },
   { label: "Reports & Analytics", href: "/reports", icon: BarChart3 },
+];
+
+const custodyNav = [
+  { label: "Custody Intelligence", href: "/custody", icon: Lock, badge: "NEW" },
+  { label: "Document Library", href: "/documents", icon: Database, badge: null },
+  { label: "Upload Document", href: "/upload", icon: Upload, badge: "RAG" },
+  { label: "Query Engine", href: "/query", icon: Search, badge: "AI" },
 ];
 
 export default function Sidebar() {
@@ -75,6 +86,37 @@ export default function Sidebar() {
             </Link>
           );
         })}
+
+        {/* Custody section */}
+        <div className="pt-3 pb-1">
+          <div className="px-3 mb-1.5 flex items-center gap-1.5">
+            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-semibold">Custody · Trust Co.</span>
+            <div className="flex-1 h-px bg-white/5" />
+          </div>
+          {custodyNav.map(({ label, href, icon: Icon, badge }) => {
+            const active = pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all",
+                  active
+                    ? "bg-[#D4A843]/10 text-[#D4A843] border border-[#D4A843]/20"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent"
+                )}
+              >
+                <Icon className={cn("w-4 h-4 flex-shrink-0", active ? "text-[#D4A843]" : "text-zinc-500")} />
+                <span className="leading-tight">{label}</span>
+                {badge && (
+                  <span className="ml-auto text-[9px] bg-emerald-900/40 text-emerald-400 border border-emerald-700/30 px-1.5 py-0.5 rounded font-bold uppercase tracking-widest">
+                    {badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
       {/* Section divider */}
